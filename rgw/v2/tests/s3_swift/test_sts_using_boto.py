@@ -31,6 +31,7 @@ import json
 import logging
 import time
 import traceback
+import botocore
 
 import v2.lib.resource_op as s3lib
 import v2.utils.utils as utils
@@ -129,14 +130,14 @@ def test_exec(config):
     assumed_role_user_info = {
         "access_key": assume_role_response["Credentials"]["AccessKeyId"],
         "secret_key": assume_role_response["Credentials"]["SecretAccessKey"],
-        "session_token": assume_role_response["Credentials"]["SessionToken"],
+        "session_token": assume_role_response["Credentials"]["SecretAccessKey"],
         "user_id": user2["user_id"],
     }
 
     log.info("got the credentials after assume role")
     s3client = Auth(assumed_role_user_info, ssl=config.ssl)
     s3_client_rgw = s3client.do_auth()
-
+    s3_client = s3client.do_auth_using_client()
     io_info_initialize.initialize(basic_io_structure.initial())
     write_user_info = AddUserInfo()
     basic_io_structure = BasicIOInfoStructure()
@@ -162,9 +163,11 @@ def test_exec(config):
             if config.test_ops["create_object"] is True:
                 # uploading data
                 log.info("s3 objects to create: %s" % config.objects_count)
+
                 for oc, size in list(config.mapped_sizes.items()):
                     config.obj_size = size
                     s3_object_name = utils.gen_s3_object_name(bucket_name_to_create, oc)
+                    unexisting_s3_object_name = s3_object_name + "_unexisting"
                     log.info("s3 object name: %s" % s3_object_name)
                     s3_object_path = os.path.join(TEST_DATA_PATH, s3_object_name)
                     log.info("s3 object path: %s" % s3_object_path)
@@ -186,6 +189,19 @@ def test_exec(config):
                             config,
                             assumed_role_user_info,
                         )
+                unexisting_object = bucket_name_to_create + "_unexisting_object"
+                #response = s3_client.head_object(Bucket=bucket_name_to_create, Key=unexisting_object)
+                try:
+                    response = s3_client.head_object(Bucket=bucket_name_to_create, Key=unexisting_object)
+                except botocore.exceptions.ClientError as e:
+                    response_code = e.response['Error']['Code']
+                    log.info(response_code)
+                    if e.response['Error']['Code'] == "404":
+                        log.info("404 Unexisting Object Not Found")
+                    elif e.response['Error']['Code'] == "403":
+                        log.info("403 Forbidden")
+
+
 
     # check for any crashes during the execution
     crash_info = reusable.check_for_crash()
